@@ -1,15 +1,12 @@
 {
-  "name": "dual-rail-api",
+  "name": "dual-rail-backend",
   "version": "1.0.0",
-  "description": "Backend API for the Dual-Rail Payments Demo (Legacy vs Blockchain with failover)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "author": "Chetan",
-  "license": "MIT",
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.18.2"
+    "express": "^4.19.2"
   }
 }

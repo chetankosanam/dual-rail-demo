@@ -1,4 +1,3 @@
-// backend/server.js
 const express = require("express");
 const cors = require("cors");
 
@@ -52,8 +51,8 @@ function appendToLedger(payment) {
 }
 
 // POST /api/payments  -> create payment(s) on a rail
-// - normal: returns 1 payment
-// - blockchain failover: returns 2 payments (failed chain + legacy fallback)
+// - normal: 1 payment
+// - blockchain failover: 2 payments (failed chain + legacy fallback)
 app.post("/api/payments", (req, res) => {
   const { from, to, amount, corridor, rail } = req.body;
 
@@ -98,7 +97,7 @@ app.post("/api/payments", (req, res) => {
     settlementHours = randomBetween(0.1, 2);
     fee = numAmount * randomBetween(0.0008, 0.002);
 
-    // 🔥 10% chance we simulate a blockchain rail failure
+    // 10% chance we simulate a blockchain rail failure
     const failover = Math.random() < 0.10;
 
     if (failover) {
@@ -145,7 +144,7 @@ app.post("/api/payments", (req, res) => {
         fee: numAmount * randomBetween(0.004, 0.008),
         exception: Math.random() < 0.2,
         failed: false,
-        fallbackFrom: "blockchain",   // came from failed chain tx
+        fallbackFrom: "blockchain",
         fallbackTo: null,
         createdAt: new Date().toISOString()
       };

@@ -1,3 +1,4 @@
+// backend/server.js
 const express = require("express");
 const cors = require("cors");
 
@@ -50,7 +51,9 @@ function appendToLedger(payment) {
   state.ledgerBlocks.push(block);
 }
 
-// POST /api/payments  -> create a payment on chosen rail
+// POST /api/payments  -> create payment(s) on a rail
+// - normal: returns 1 payment
+// - blockchain failover: returns 2 payments (failed chain + legacy fallback)
 app.post("/api/payments", (req, res) => {
   const { from, to, amount, corridor, rail } = req.body;
 
@@ -63,45 +66,101 @@ app.post("/api/payments", (req, res) => {
     return res.status(400).json({ error: "Invalid amount" });
   }
 
-  let settlementHours, fee, exception;
+  let settlementHours, fee, exception, failed = false;
+  const createdPayments = [];
 
   if (rail === "legacy") {
-    // Legacy rail – slower, more expensive, higher exception rate
-    settlementHours = randomBetween(24, 48);          // T+1 style
-    fee = numAmount * randomBetween(0.004, 0.008);    // 0.4%–0.8%
-    exception = Math.random() < 0.2;                  // 20%
+    // LEGACY RAIL – slower, more expensive, more exceptions
+    settlementHours = randomBetween(24, 48);
+    fee = numAmount * randomBetween(0.004, 0.008);
+    exception = Math.random() < 0.2;
+
+    const payment = {
+      id: state.payments.length + 1,
+      rail: "legacy",
+      from,
+      to,
+      amount: numAmount,
+      corridor,
+      settlementHours,
+      fee,
+      exception,
+      failed: false,
+      fallbackFrom: null,
+      fallbackTo: null,
+      createdAt: new Date().toISOString()
+    };
+
+    state.payments.push(payment);
+    createdPayments.push(payment);
   } else if (rail === "blockchain") {
-    // Blockchain rail – fast, cheaper, fewer exceptions
-    settlementHours = randomBetween(0.1, 2);          // < 2 hours
-    fee = numAmount * randomBetween(0.0008, 0.002);   // 0.08%–0.2%
-    exception = Math.random() < 0.05;                 // 5%
+    // BLOCKCHAIN RAIL – normally fast/cheap/few exceptions
+    settlementHours = randomBetween(0.1, 2);
+    fee = numAmount * randomBetween(0.0008, 0.002);
+
+    // 🔥 10% chance we simulate a blockchain rail failure
+    const failover = Math.random() < 0.10;
+
+    if (failover) {
+      exception = true;
+      failed = true;
+    } else {
+      exception = Math.random() < 0.05;
+    }
+
+    const chainPayment = {
+      id: state.payments.length + 1,
+      rail: "blockchain",
+      from,
+      to,
+      amount: numAmount,
+      corridor,
+      settlementHours,
+      fee,
+      exception,
+      failed,                // true only when failover triggered
+      fallbackFrom: null,
+      fallbackTo: failover ? "legacy" : null,
+      createdAt: new Date().toISOString()
+    };
+
+    state.payments.push(chainPayment);
+    createdPayments.push(chainPayment);
+
+    // Only successful blockchain payments go into the ledger
+    if (!failover) {
+      appendToLedger(chainPayment);
+    }
+
+    // If blockchain "fails", automatically create Legacy fallback
+    if (failover) {
+      const legacyPayment = {
+        id: state.payments.length + 1,
+        rail: "legacy",
+        from,
+        to,
+        amount: numAmount,
+        corridor,
+        settlementHours: randomBetween(24, 48),
+        fee: numAmount * randomBetween(0.004, 0.008),
+        exception: Math.random() < 0.2,
+        failed: false,
+        fallbackFrom: "blockchain",   // came from failed chain tx
+        fallbackTo: null,
+        createdAt: new Date().toISOString()
+      };
+
+      state.payments.push(legacyPayment);
+      createdPayments.push(legacyPayment);
+    }
   } else {
     return res.status(400).json({ error: "Invalid rail" });
   }
 
-  const payment = {
-    id: state.payments.length + 1,
-    rail,
-    from,
-    to,
-    amount: numAmount,
-    corridor,
-    settlementHours,
-    fee,
-    exception,
-    createdAt: new Date().toISOString()
-  };
-
-  state.payments.push(payment);
-
-  if (rail === "blockchain") {
-    appendToLedger(payment);
-  }
-
-  res.json({ payment });
+  res.json({ payments: createdPayments });
 });
 
-// GET /api/state -> returns all payments + ledger blocks
+// GET /api/state -> all payments + blocks
 app.get("/api/state", (req, res) => {
   res.json({
     payments: state.payments,

@@ -160,12 +160,6 @@
       font-size: 0.75rem;
       color: #8b91c7;
     }
-    code {
-      background: #10162c;
-      padding: 1px 4px;
-      border-radius: 4px;
-      font-size: 0.75rem;
-    }
     .ledger-entry {
       font-size: 0.8rem;
       border-bottom: 1px dashed #262f54;
@@ -185,8 +179,7 @@
       border: 1px solid #444c7a;
       color: #b3b8ff;
     }
-
-    /* Fake network status bar + spinner */
+    /* Network bar */
     .network-bar {
       display: flex;
       align-items: center;
@@ -197,7 +190,7 @@
       background: #10162c;
       border: 1px solid #262f54;
       margin-top: 10px;
-      max-width: 340px;
+      max-width: 360px;
     }
     .network-dot {
       width: 8px;
@@ -223,9 +216,7 @@
       border-top-color: #c0c7ff;
       animation: spin 0.7s linear infinite;
     }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .network-log {
       margin-top: 6px;
       font-size: 0.72rem;
@@ -235,7 +226,6 @@
     }
   </style>
 </head>
-
 <body>
 <div class="container">
   <div class="card">
@@ -250,8 +240,7 @@
     </div>
     <div class="kpi-grid" id="kpiGrid"></div>
 
-    <!-- Fake network status -->
-    <div class="network-bar" id="networkBar">
+    <div class="network-bar">
       <div class="network-dot" id="networkDot"></div>
       <div id="networkText">Connecting…</div>
       <div id="networkSpinner" style="margin-left:auto; display:none;">
@@ -261,7 +250,6 @@
     <div class="network-log" id="networkLog"></div>
   </div>
 
-  <!-- Input form -->
   <div class="card">
     <div class="card-header">
       <h2>Create Payment</h2>
@@ -294,7 +282,6 @@
     </div>
   </div>
 
-  <!-- Tables -->
   <div class="grid">
     <div class="card">
       <div class="card-header">
@@ -328,17 +315,16 @@
   <div class="card">
     <h3>About This Demo</h3>
     <p class="muted">
-      This demo shows a dual-rail payment system. Legacy Rail simulates T+1 settlement with higher fees 
-      and more exceptions. Blockchain Rail simulates near-instant settlement, lower fees, and an append-only ledger.
+      This demo compares a traditional legacy payment rail against a blockchain-based rail.
+      In some cases the blockchain rail intentionally "fails" and the same payment is
+      automatically rerouted over the legacy rail to mimic operational failover.
     </p>
   </div>
 </div>
 
-
-
 <script>
-  
-  const API_BASE = "https://dual-rail-api.onrender.com";
+  // 🔥 Replace this with your actual Render URL
+  const API_BASE = "https://YOUR-RENDER-URL.onrender.com";
 
   const state = {
     payments: [],
@@ -354,8 +340,7 @@
   const btnChain = document.getElementById("btnChain");
 
   function logNetwork(message) {
-    const now = new Date();
-    const ts = now.toLocaleTimeString();
+    const ts = new Date().toLocaleTimeString();
     const div = document.createElement("div");
     div.textContent = `[${ts}] ${message}`;
     networkLog.prepend(div);
@@ -366,15 +351,13 @@
     if (isBusy) {
       networkDot.classList.add("busy");
       networkSpinner.style.display = "block";
-      networkText.textContent =
-        `Submitting ${railLabel} transaction to API…`;
+      networkText.textContent = `Submitting ${railLabel} transaction to API…`;
       btnLegacy.disabled = true;
       btnChain.disabled = true;
     } else {
       networkDot.classList.remove("busy");
       networkSpinner.style.display = "none";
-      networkText.textContent =
-        `Connected to ${API_BASE}`;
+      networkText.textContent = `Connected to ${API_BASE}`;
       btnLegacy.disabled = false;
       btnChain.disabled = false;
     }
@@ -389,9 +372,13 @@
     const amount = amountInput ? Number(amountInput) : 5000;
     const corridor = document.getElementById("corridor").value;
 
-    const railLabel = rail === "legacy" ? "Legacy" : "Blockchain";
+    if (!amount || amount <= 0) {
+      alert("Enter a positive amount.");
+      return;
+    }
 
-    logNetwork(`${railLabel}: Building transaction payload…`);
+    const railLabel = rail === "legacy" ? "Legacy" : "Blockchain";
+    logNetwork(`${railLabel}: building transaction payload…`);
     setNetworkBusy(true, railLabel);
 
     try {
@@ -401,12 +388,26 @@
         body: JSON.stringify({ from, to, amount, corridor, rail })
       });
 
-      const data = await res.json();
-      logNetwork(`${railLabel}: API accepted payment id=${data.payment.id}`);
-      await refreshState();
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "API error");
+      }
 
+      const data = await res.json();
+      const created = data.payments || [];
+      if (created.length > 0) {
+        logNetwork(
+          `${railLabel}: API created ${created.length} payment record(s), first id=${created[0].id}`
+        );
+      } else {
+        logNetwork(`${railLabel}: API responded with no payments array.`);
+      }
+
+      await refreshState();
     } catch (e) {
+      console.error(e);
       logNetwork(`ERROR: ${e.message}`);
+      alert("Backend error: " + e.message);
     } finally {
       setNetworkBusy(false);
     }
@@ -415,14 +416,15 @@
   async function refreshState() {
     try {
       const res = await fetch(`${API_BASE}/api/state`);
+      if (!res.ok) throw new Error("Failed to load state");
       const data = await res.json();
-      state.payments = data.payments;
-      state.ledgerBlocks = data.ledgerBlocks;
-
+      state.payments = data.payments || [];
+      state.ledgerBlocks = data.ledgerBlocks || [];
       renderPayments();
       renderKPIs();
       renderLedger();
     } catch (e) {
+      console.error(e);
       logNetwork("Error loading state: " + e.message);
     }
   }
@@ -431,44 +433,62 @@
     const tbody = document.getElementById("paymentsTableBody");
     tbody.innerHTML = "";
 
-    state.payments.slice().reverse().forEach((p) => {
-      const tr = document.createElement("tr");
+    state.payments
+      .slice()
+      .reverse()
+      .forEach((p) => {
+        const tr = document.createElement("tr");
 
-      const railTd = document.createElement("td");
-      const railSpan = document.createElement("span");
-      railSpan.className =
-        "rail-tag " + (p.rail === "legacy" ? "rail-legacy" : "rail-chain");
-      railSpan.textContent = p.rail === "legacy" ? "Legacy" : "Blockchain";
-      railTd.appendChild(railSpan);
-      tr.appendChild(railTd);
+        const railTd = document.createElement("td");
+        const railSpan = document.createElement("span");
+        railSpan.className =
+          "rail-tag " + (p.rail === "legacy" ? "rail-legacy" : "rail-chain");
+        railSpan.textContent = p.rail === "legacy" ? "Legacy" : "Blockchain";
+        railTd.appendChild(railSpan);
+        tr.appendChild(railTd);
 
-      const fromToTd = document.createElement("td");
-      fromToTd.textContent = `${p.from} → ${p.to}`;
-      tr.appendChild(fromToTd);
+        const fromToTd = document.createElement("td");
+        fromToTd.textContent = `${p.from} → ${p.to}`;
+        tr.appendChild(fromToTd);
 
-      const amountTd = document.createElement("td");
-      amountTd.textContent = "$" + p.amount.toLocaleString();
-      tr.appendChild(amountTd);
+        const amountTd = document.createElement("td");
+        amountTd.textContent = "$" + p.amount.toLocaleString();
+        tr.appendChild(amountTd);
 
-      const settleTd = document.createElement("td");
-      if (p.settlementHours >= 24) {
-        settleTd.textContent = (p.settlementHours / 24).toFixed(1) + " days";
-      } else {
-        settleTd.textContent = p.settlementHours.toFixed(2) + " h";
-      }
-      tr.appendChild(settleTd);
+        const settleTd = document.createElement("td");
+        if (p.settlementHours >= 24) {
+          settleTd.textContent = (p.settlementHours / 24).toFixed(1) + " days";
+        } else {
+          settleTd.textContent = p.settlementHours.toFixed(2) + " h";
+        }
+        tr.appendChild(settleTd);
 
-      const feeTd = document.createElement("td");
-      feeTd.textContent = "$" + p.fee.toFixed(2);
-      tr.appendChild(feeTd);
+        const feeTd = document.createElement("td");
+        feeTd.textContent = "$" + p.fee.toFixed(2);
+        tr.appendChild(feeTd);
 
-      const statusTd = document.createElement("td");
-      statusTd.textContent = p.exception ? "Exception" : "OK";
-      statusTd.className = p.exception ? "status-ex" : "status-ok";
-      tr.appendChild(statusTd);
+        // Status with failover explanation
+        const statusTd = document.createElement("td");
+        let statusText = "OK";
+        let statusClass = "status-ok";
 
-      tbody.appendChild(tr);
-    });
+        if (p.failed && p.fallbackTo === "legacy") {
+          statusText = "Failed → Legacy fallback";
+          statusClass = "status-ex";
+        } else if (p.fallbackFrom === "blockchain") {
+          statusText = "Legacy (fallback from chain)";
+          statusClass = "status-ok";
+        } else if (p.exception) {
+          statusText = "Exception";
+          statusClass = "status-ex";
+        }
+
+        statusTd.textContent = statusText;
+        statusTd.className = statusClass;
+        tr.appendChild(statusTd);
+
+        tbody.appendChild(tr);
+      });
   }
 
   function renderKPIs() {
@@ -477,9 +497,11 @@
 
     ["legacy", "blockchain"].forEach((rail) => {
       const subset = state.payments.filter((p) => p.rail === rail);
-      const count = subset.length || 0;
+      const count = subset.length;
 
-      let avgSettle = 0, avgFee = 0, exceptions = 0;
+      let avgSettle = 0,
+        avgFee = 0,
+        exceptions = 0;
       subset.forEach((p) => {
         avgSettle += p.settlementHours;
         avgFee += p.fee;
@@ -492,11 +514,17 @@
       }
 
       const exRate = count ? (exceptions / count) * 100 : 0;
+      const label = rail === "legacy" ? "Legacy Rail" : "Blockchain Rail";
 
       const card = document.createElement("div");
       card.className = "kpi";
 
-      const label = rail === "legacy" ? "Legacy Rail" : "Blockchain Rail";
+      const settleStr =
+        count === 0
+          ? "No data yet"
+          : avgSettle >= 24
+          ? (avgSettle / 24).toFixed(1) + " days"
+          : avgSettle.toFixed(2) + " h";
 
       card.innerHTML = `
         <div class="kpi-label">${label}</div>
@@ -504,11 +532,9 @@
           ${
             count === 0
               ? "No data yet"
-              : `${
-                  avgSettle >= 24
-                    ? (avgSettle / 24).toFixed(1) + " days"
-                    : avgSettle.toFixed(2) + " h"
-                } • $${avgFee.toFixed(2)}/tx • ${exRate.toFixed(1)}% exceptions`
+              : `${settleStr} • $${avgFee.toFixed(
+                  2
+                )}/tx • ${exRate.toFixed(1)}% exceptions`
           }
         </div>
         <div class="muted">${count} tx sampled</div>
@@ -522,7 +548,7 @@
     const container = document.getElementById("ledgerContainer");
     container.innerHTML = "";
 
-    if (state.ledgerBlocks.length === 0) {
+    if (!state.ledgerBlocks.length) {
       container.innerHTML =
         '<div class="muted">No blockchain payments yet.</div>';
       return;
@@ -533,21 +559,22 @@
       .reverse()
       .forEach((b) => {
         const payloadObj = JSON.parse(b.payload);
-
         const div = document.createElement("div");
         div.className = "ledger-entry";
-
         div.innerHTML = `
-          <div><strong>Block #${b.index}</strong> • $${Number(
-            payloadObj.amount
-          ).toLocaleString()} (${payloadObj.corridor})</div>
+          <div>
+            <strong>Block #${b.index}</strong> • $${Number(
+          payloadObj.amount
+        ).toLocaleString()} (${payloadObj.corridor})
+          </div>
           <div class="muted">
-            ${payloadObj.from} → ${payloadObj.to} • ${payloadObj.settlementHours} h • Fee $${payloadObj.fee}
+            ${payloadObj.from} → ${payloadObj.to} • ${
+          payloadObj.settlementHours
+        } h • Fee $${payloadObj.fee}
           </div>
           <div class="hash">prev: ${b.prevHash}</div>
           <div class="hash">hash: ${b.hash}</div>
         `;
-
         container.appendChild(div);
       });
   }
@@ -559,11 +586,10 @@
     submitPayment("blockchain");
   }
 
+  // Initial load + polling
   refreshState();
   setInterval(refreshState, 5000);
-  logNetwork("Frontend loaded. Connecting to backend…");
-
+  logNetwork("Frontend loaded. Waiting for API responses…");
 </script>
-
 </body>
 </html>

@@ -337,7 +337,6 @@
 
 
 <script>
-  
   const API_BASE = "https://dual-rail-api.onrender.com";
 
   const state = {
@@ -471,6 +470,7 @@
     });
   }
 
+  // UPDATED: richer performance metrics per rail
   function renderKPIs() {
     const kpiGrid = document.getElementById("kpiGrid");
     kpiGrid.innerHTML = "";
@@ -479,40 +479,54 @@
       const subset = state.payments.filter((p) => p.rail === rail);
       const count = subset.length || 0;
 
-      let avgSettle = 0, avgFee = 0, exceptions = 0;
+      let totalSettle = 0;
+      let totalFee = 0;
+      let totalVolume = 0;
+      let exceptions = 0;
+
       subset.forEach((p) => {
-        avgSettle += p.settlementHours;
-        avgFee += p.fee;
+        totalSettle += p.settlementHours;
+        totalFee += p.fee;
+        totalVolume += p.amount;
         if (p.exception) exceptions++;
       });
 
-      if (count > 0) {
-        avgSettle /= count;
-        avgFee /= count;
-      }
-
+      const avgSettle = count ? totalSettle / count : 0;
+      const avgFee = count ? totalFee / count : 0;
       const exRate = count ? (exceptions / count) * 100 : 0;
+
+      const label = rail === "legacy" ? "Legacy Rail" : "Blockchain Rail";
+
+      // Format average settlement time as hours or days
+      let avgSettleDisplay = "–";
+      if (count > 0) {
+        if (avgSettle >= 24) {
+          avgSettleDisplay = (avgSettle / 24).toFixed(1) + " days";
+        } else {
+          avgSettleDisplay = avgSettle.toFixed(2) + " h";
+        }
+      }
 
       const card = document.createElement("div");
       card.className = "kpi";
 
-      const label = rail === "legacy" ? "Legacy Rail" : "Blockchain Rail";
-
-      card.innerHTML = `
-        <div class="kpi-label">${label}</div>
-        <div class="kpi-value">
-          ${
-            count === 0
-              ? "No data yet"
-              : `${
-                  avgSettle >= 24
-                    ? (avgSettle / 24).toFixed(1) + " days"
-                    : avgSettle.toFixed(2) + " h"
-                } • $${avgFee.toFixed(2)}/tx • ${exRate.toFixed(1)}% exceptions`
-          }
-        </div>
-        <div class="muted">${count} tx sampled</div>
-      `;
+      if (count === 0) {
+        card.innerHTML = `
+          <div class="kpi-label">${label}</div>
+          <div class="kpi-value">No data yet</div>
+          <div class="muted">Submit a few payments on this rail to see metrics.</div>
+        `;
+      } else {
+        card.innerHTML = `
+          <div class="kpi-label">${label}</div>
+          <div class="kpi-value">
+            ${avgSettleDisplay} • $${avgFee.toFixed(2)}/tx
+          </div>
+          <div class="muted">
+            ${count} tx • $${totalVolume.toLocaleString()} total • ${exRate.toFixed(1)}% exceptions
+          </div>
+        `;
+      }
 
       kpiGrid.appendChild(card);
     });
@@ -562,7 +576,6 @@
   refreshState();
   setInterval(refreshState, 5000);
   logNetwork("Frontend loaded. Connecting to backend…");
-
 </script>
 
 </body>

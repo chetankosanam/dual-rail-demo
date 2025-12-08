@@ -3,6 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <title>Dual-Rail Payments Demo – Legacy vs Blockchain</title>
+
+  <!-- Chart.js for performance chart -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
   <style>
     body {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -233,6 +237,20 @@
       max-height: 60px;
       overflow-y: auto;
     }
+
+    /* Chart wrapper */
+    .chart-wrapper {
+      margin-top: 12px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: #10162c;
+      border: 1px solid #262f54;
+    }
+    .chart-title {
+      font-size: 0.8rem;
+      color: #9da5ff;
+      margin-bottom: 4px;
+    }
   </style>
 </head>
 
@@ -248,7 +266,17 @@
       </div>
       <div class="pill">Prototype Pilot</div>
     </div>
+
+    <!-- KPI summary -->
     <div class="kpi-grid" id="kpiGrid"></div>
+
+    <!-- Performance chart -->
+    <div class="chart-wrapper">
+      <div class="chart-title">
+        Performance Chart: Avg settlement time (hours) vs exception rate (%)
+      </div>
+      <canvas id="metricsChart" height="110"></canvas>
+    </div>
 
     <!-- Fake network status -->
     <div class="network-bar" id="networkBar">
@@ -351,6 +379,8 @@
   const networkLog = document.getElementById("networkLog");
   const btnLegacy = document.getElementById("btnLegacy");
   const btnChain = document.getElementById("btnChain");
+
+  let metricsChart = null; // Chart.js instance
 
   function logNetwork(message) {
     const now = new Date();
@@ -470,10 +500,14 @@
     });
   }
 
-  // UPDATED: richer performance metrics per rail
+  // KPI cards + chart data
   function renderKPIs() {
     const kpiGrid = document.getElementById("kpiGrid");
     kpiGrid.innerHTML = "";
+
+    const labels = [];
+    const avgSettles = []; // hours
+    const exRates = [];    // %
 
     ["legacy", "blockchain"].forEach((rail) => {
       const subset = state.payments.filter((p) => p.rail === rail);
@@ -497,7 +531,12 @@
 
       const label = rail === "legacy" ? "Legacy Rail" : "Blockchain Rail";
 
-      // Format average settlement time as hours or days
+      // For chart arrays
+      labels.push(label.replace(" Rail", ""));
+      avgSettles.push(avgSettle);
+      exRates.push(exRate);
+
+      // Format average settlement time as hours or days for card
       let avgSettleDisplay = "–";
       if (count > 0) {
         if (avgSettle >= 24) {
@@ -530,6 +569,100 @@
 
       kpiGrid.appendChild(card);
     });
+
+    renderMetricsChart(labels, avgSettles, exRates);
+  }
+
+  // Create / update Chart.js chart
+  function renderMetricsChart(labels, avgSettles, exRates) {
+    const ctx = document.getElementById("metricsChart").getContext("2d");
+
+    const hasData =
+      avgSettles.some((v) => v > 0) || exRates.some((v) => v > 0);
+
+    if (!hasData) {
+      if (metricsChart) {
+        metricsChart.destroy();
+        metricsChart = null;
+      }
+      return;
+    }
+
+    const data = {
+      labels,
+      datasets: [
+        {
+          label: "Avg settlement time (hours)",
+          data: avgSettles,
+          backgroundColor: "rgba(60, 141, 250, 0.7)",
+          borderRadius: 6,
+          yAxisID: "y"
+        },
+        {
+          label: "Exception rate (%)",
+          data: exRates,
+          type: "line",
+          borderColor: "rgba(244, 162, 97, 0.95)",
+          borderWidth: 2,
+          pointRadius: 4,
+          pointBackgroundColor: "rgba(244, 162, 97, 1)",
+          yAxisID: "y1"
+        }
+      ]
+    };
+
+    const options = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          labels: {
+            color: "#c0c7ff",
+            font: { size: 11 }
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: "#c0c7ff", font: { size: 11 } },
+          grid: { color: "rgba(255,255,255,0.05)" }
+        },
+        y: {
+          position: "left",
+          ticks: { color: "#c0c7ff", font: { size: 10 } },
+          grid: { color: "rgba(255,255,255,0.08)" },
+          title: {
+            display: true,
+            text: "Hours",
+            color: "#c0c7ff",
+            font: { size: 10 }
+          }
+        },
+        y1: {
+          position: "right",
+          ticks: { color: "#f4a261", font: { size: 10 } },
+          grid: { drawOnChartArea: false },
+          title: {
+            display: true,
+            text: "Exception rate (%)",
+            color: "#f4a261",
+            font: { size: 10 }
+          }
+        }
+      }
+    };
+
+    if (metricsChart) {
+      metricsChart.data = data;
+      metricsChart.options = options;
+      metricsChart.update();
+    } else {
+      metricsChart = new Chart(ctx, {
+        type: "bar",
+        data,
+        options
+      });
+    }
   }
 
   function renderLedger() {
